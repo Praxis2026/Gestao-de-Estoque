@@ -38,34 +38,53 @@ export default function PatientsCourses() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    const delayDebounceFn = setTimeout(() => {
-      fetchData(searchTerm);
-    }, 500);
+    fetchData();
+  }, [activeTab]);
 
-    return () => clearTimeout(delayDebounceFn);
-  }, [activeTab, searchTerm]);
+  function removeAccents(str: string): string {
+    if (!str) return '';
+    return str
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/ç/g, 'c')
+      .replace(/Ç/g, 'C')
+      .toLowerCase();
+  }
 
-  async function fetchData(search: string = '') {
+  async function fetchData() {
     setLoading(true);
     try {
       const table = activeTab === 'patients' ? 'Patient' : 'Course';
-      let query = supabase
-        .from(table)
-        .select('*')
-        .order('nome');
+      let allData: any[] = [];
+      let from = 0;
+      const limit = 1000;
+      let keepFetching = true;
 
-      if (search) {
-        query = query.ilike('nome', `%${search}%`);
+      while (keepFetching) {
+        const { data, error } = await supabase
+          .from(table)
+          .select('*')
+          .order('nome')
+          .range(from, from + limit - 1);
+
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+          allData = [...allData, ...data];
+          if (data.length < limit) {
+            keepFetching = false;
+          } else {
+            from += limit;
+          }
+        } else {
+          keepFetching = false;
+        }
       }
-
-      const { data, error } = await query;
-      
-      if (error) throw error;
       
       if (activeTab === 'patients') {
-        setPatients(data || []);
+        setPatients(allData);
       } else {
-        setCourses(data || []);
+        setCourses(allData);
       }
     } catch (error) {
       console.error('Erro ao buscar dados:', error);
@@ -221,7 +240,10 @@ export default function PatientsCourses() {
     }
   };
 
-  const filtered = activeTab === 'patients' ? patients : courses;
+  const filtered = (activeTab === 'patients' ? patients : courses).filter(item => {
+    if (!searchTerm) return true;
+    return removeAccents(item.nome ?? '').includes(removeAccents(searchTerm));
+  });
 
   // Permissions
   const patientPermissions = user?.perfil?.permissions?.pacientes;

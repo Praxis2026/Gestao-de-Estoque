@@ -19,6 +19,116 @@ import * as XLSX from 'xlsx';
 import { useAuth } from '@/contexts/AuthContext';
 import { Navigate } from 'react-router-dom';
 
+interface DateInputProps {
+  value: string;
+  onChange: (value: string) => void;
+  label: string;
+}
+
+function DateInput({ value, onChange, label }: DateInputProps) {
+  const [localText, setLocalText] = useState('');
+
+  useEffect(() => {
+    if (value) {
+      setLocalText(formatDate(value));
+    } else {
+      setLocalText('');
+    }
+  }, [value]);
+
+  const handleTextChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    const isDeleting = val.length < localText.length;
+    let clean = val.replace(/\D/g, '');
+    if (clean.length > 8) {
+      clean = clean.slice(0, 8);
+    }
+    
+    let formatted = val;
+    if (!isDeleting) {
+      if (clean.length > 2 && clean.length <= 4) {
+        formatted = `${clean.slice(0, 2)}/${clean.slice(2)}`;
+      } else if (clean.length > 4) {
+        formatted = `${clean.slice(0, 2)}/${clean.slice(2, 4)}/${clean.slice(4, 8)}`;
+      } else {
+        formatted = clean;
+      }
+    } else {
+      if (localText.endsWith('/') && val.length === localText.length - 1) {
+        clean = clean.slice(0, -1);
+      }
+      if (clean.length > 2 && clean.length <= 4) {
+        formatted = `${clean.slice(0, 2)}/${clean.slice(2)}`;
+      } else if (clean.length > 4) {
+        formatted = `${clean.slice(0, 2)}/${clean.slice(2, 4)}/${clean.slice(4)}`;
+      } else {
+        formatted = clean;
+      }
+    }
+    
+    setLocalText(formatted);
+    
+    if (formatted.length === 10) {
+      const parts = formatted.split('/');
+      if (parts.length === 3) {
+        const d = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10);
+        const y = parseInt(parts[2], 10);
+        if (d >= 1 && d <= 31 && m >= 1 && m <= 12 && y >= 1900 && y <= 2100) {
+          const padD = d.toString().padStart(2, '0');
+          const padM = m.toString().padStart(2, '0');
+          const padY = y.toString().padStart(4, '0');
+          const ymd = `${padY}-${padM}-${padD}`;
+          const testDate = new Date(`${ymd}T12:00:00`);
+          if (!isNaN(testDate.getTime())) {
+            onChange(ymd);
+          }
+        }
+      }
+    }
+  };
+
+  return (
+    <div>
+      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{label}</label>
+      <div className="relative flex items-center">
+        <input
+          type="text"
+          placeholder="DD/MM/AAAA"
+          value={localText}
+          onChange={handleTextChange}
+          maxLength={10}
+          className="w-full pl-3 pr-10 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all text-sm font-mono"
+        />
+        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center justify-center w-8 h-8 pointer-events-none">
+          <Calendar className="w-4 h-4 text-slate-400" />
+        </div>
+        <input
+          type="date"
+          value={value}
+          onChange={(e) => {
+            const val = e.target.value;
+            if (val) {
+              onChange(val);
+            }
+          }}
+          className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 cursor-pointer w-8 h-8 pointer-events-auto"
+        />
+      </div>
+    </div>
+  );
+}
+
+function removeAccents(str: string): string {
+  if (!str) return '';
+  return str
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/ç/g, 'c')
+    .replace(/Ç/g, 'C')
+    .toLowerCase();
+}
+
 export default function Reports() {
   const { user } = useAuth();
   const [movements, setMovements] = useState<Movimentacao[]>([]);
@@ -85,9 +195,7 @@ export default function Reports() {
         query = query.eq('material.tipo_material', filterMaterialType);
       }
 
-      if (selectedPatient) {
-        query = query.ilike('paciente_ou_curso', `%${selectedPatient}%`);
-      } else if (selectedCourse) {
+      if (selectedCourse) {
         query = query.eq('paciente_ou_curso', selectedCourse);
       }
 
@@ -110,7 +218,10 @@ export default function Reports() {
     }
   }
 
-  const filteredMovements = movements;
+  const filteredMovements = movements.filter(mov => {
+    if (!selectedPatient) return true;
+    return removeAccents(mov.paciente_ou_curso ?? '').includes(removeAccents(selectedPatient));
+  });
 
   // Permission check
   const canView = user?.role === 'ADMINISTRADOR' || user?.perfil?.permissions?.relatorios?.visualizar;
@@ -143,15 +254,19 @@ export default function Reports() {
         query = query.eq('material.tipo_material', filterMaterialType);
       }
 
-      if (selectedPatient) {
-        query = query.ilike('paciente_ou_curso', `%${selectedPatient}%`);
-      } else if (selectedCourse) {
+      if (selectedCourse) {
         query = query.eq('paciente_ou_curso', selectedCourse);
       }
 
       const { data, error } = await query;
       if (error) throw error;
-      return data as Movimentacao[];
+
+      const movementsData = data as Movimentacao[];
+      if (!selectedPatient) return movementsData;
+
+      return movementsData.filter(mov =>
+        removeAccents(mov.paciente_ou_curso ?? '').includes(removeAccents(selectedPatient))
+      );
     } catch (error) {
       console.error('Erro ao buscar dados para exportação:', error);
       return movements; // Fallback to current state
@@ -345,24 +460,16 @@ export default function Reports() {
           <h2>Filtros do Relatório</h2>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Início</label>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Fim</label>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all text-sm"
-            />
-          </div>
+          <DateInput
+            value={startDate}
+            onChange={setStartDate}
+            label="Início"
+          />
+          <DateInput
+            value={endDate}
+            onChange={setEndDate}
+            label="Fim"
+          />
           <div>
             <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Tipo Mov.</label>
             <select
