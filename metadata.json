@@ -1,0 +1,5 @@
+{
+  "name": "ClinStockPro",
+  "description": "Sistema completo de gestão de estoque com controle de materiais, movimentações e níveis de acesso.",
+  "requestFramePermissions": []
+}
